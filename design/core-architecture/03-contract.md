@@ -1,38 +1,23 @@
-# Phase 3: The Contract (TypeScript/Effect) - REVISED
+# Phase 3: The Contract (TypeScript/Effect) - REVISED v2
 
 ## 1. Domain Models (Pure Data)
 **Location:** `src/domain/models/command.ts`
-**Rule:** Use `Schema.Struct`, Branded Types, and Data-Last Ops.
+**Rule:** Schema.Struct only. No Methods.
 
 ```typescript
 import { Schema } from "@effect/schema";
 import { Brand } from "effect";
 
-// --- Primitives ---
-export type ExitCode = number & Brand.Brand<"ExitCode">;
-export const ExitCode = Schema.Number.pipe(Schema.brand("ExitCode"));
+// ... Primitives (ExitCode, Stdout, etc.) ...
 
-export type Stdout = string & Brand.Brand<"Stdout">;
-export const Stdout = Schema.String.pipe(Schema.brand("Stdout"));
+// ... ConnectionUrl Types ...
 
-export type Stderr = string & Brand.Brand<"Stderr">;
-export const Stderr = Schema.String.pipe(Schema.brand("Stderr"));
-
-export type Duration = number & Brand.Brand<"Duration">;
-export const Duration = Schema.Number.pipe(Schema.brand("Duration"));
-
-// --- Connection Types ---
-export type SshUrl = string & Brand.Brand<"SshUrl">;
-export const SshUrl = Schema.String.pipe(
-    Schema.pattern(/^ssh:\/\/.+/), 
-    Schema.brand("SshUrl")
-);
-
-export type LocalUrl = string & Brand.Brand<"LocalUrl">;
-export const LocalUrl = Schema.Literal("local://").pipe(Schema.brand("LocalUrl"));
-
-export const ConnectionUrl = Schema.Union(SshUrl, LocalUrl);
-export type ConnectionUrl = Schema.Schema.Type<typeof ConnectionUrl>;
+// --- The Host Entity (State) ---
+export const Host = Schema.Struct({
+    url: ConnectionUrl,
+    // systemInfo can be added later
+});
+export type Host = Schema.Schema.Type<typeof Host>;
 
 // --- Command Input ---
 export const ExecCommand = Schema.Struct({
@@ -58,53 +43,37 @@ export const CommandSuccess = Schema.Struct({
 export type CommandSuccess = Schema.Schema.Type<typeof CommandSuccess>;
 ```
 
-## 2. Domain Errors (Discriminated Unions)
+## 2. Domain Errors
 **Location:** `src/domain/errors.ts`
 
 ```typescript
 import { Schema } from "@effect/schema";
+import type { ConnectionUrl } from "./models/command";
 
-// Logic Failure (Exit != 0)
-export const ExitCodeError = Schema.TaggedStruct("ExitCodeError", {
-    code: ExitCode,
-    stdout: Stdout,
-    stderr: Stderr,
-    duration: Duration
-});
-export type ExitCodeError = Schema.Schema.Type<typeof ExitCodeError>;
-
-// Infrastructure Failures
-export const ConnectionError = Schema.TaggedStruct("ConnectionError", {
-    reason: Schema.String,
-    host: ConnectionUrl
-});
-
-export const TimeoutError = Schema.TaggedStruct("TimeoutError", {
-    duration: Duration
-});
-
-export const HostError = Schema.Union(ExitCodeError, ConnectionError, TimeoutError);
-export type HostError = Schema.Schema.Type<typeof HostError>;
+// ... Error Definitions (ExitCodeError, ConnectionError) ...
+// Same as before
 ```
 
-## 3. Service Interface (The Host)
-**Location:** `src/services/Host.ts`
-**Rule:** Interface defines the capability (IO). Implementation is injected.
+## 3. Service Interface (Stateless Capability)
+**Location:** `src/services/HostExecutor.ts`
+**Rule:** Service functions take the State (Host) as an argument.
 
 ```typescript
 import { Effect, Context } from "effect";
-import type { CommandInput, CommandSuccess, ConnectionUrl } from "../domain/models/command";
+import type { Host, CommandInput, CommandSuccess } from "../domain/models/command";
 import type { HostError } from "../domain/errors";
 
-export interface Host {
-    readonly url: ConnectionUrl;
-    
-    // The Capability
-    readonly run: (input: CommandInput) => Effect.Effect<CommandSuccess, HostError>;
-}
-
-export class HostService extends Context.Tag("HostService")<
-    HostService,
-    Host
+export class HostExecutor extends Context.Tag("HostExecutor")<
+    HostExecutor,
+    {
+        /**
+         * Execute a command on a specific host.
+         * Pure wrt class state (stateless service).
+         */
+        readonly execute: (
+            host: Host, 
+            input: CommandInput
+        ) => Effect.Effect<CommandSuccess, HostError>
+    }
 >() {}
 ```
